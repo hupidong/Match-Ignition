@@ -8,7 +8,7 @@ import glob
 import json
 from tqdm import tqdm, trange
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
@@ -61,7 +61,7 @@ class MatchingDataProcessor(DataProcessor):
 
 def load_and_cache_examples(data_dir, max_len, mode, tokenizer):
     processor = MatchingDataProcessor()
-    
+
     # load data
     cached_features_file = os.path.join(
         data_dir,
@@ -75,100 +75,54 @@ def load_and_cache_examples(data_dir, max_len, mode, tokenizer):
         features = torch.load(cached_features_file)
     else:
         examples = (
-            processor.get_dev_examples(data_dir) if mode=='dev' else processor.get_train_examples(data_dir)
+            processor.get_dev_examples(data_dir) if mode == 'dev' else processor.get_train_examples(data_dir)
         )
         features = convert_examples_to_features(
-                    examples,
-                    tokenizer,
-                    label_list=processor.get_labels(),
-                    max_length=max_len,
-                    output_mode='classification',
-                    pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
-                    pad_token_segment_id=0,
-                )
+            examples,
+            tokenizer,
+            label_list=processor.get_labels(),
+            max_length=max_len,
+            output_mode='classification',
+            pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
+            pad_token_segment_id=0,
+        )
         logger.info("Saving features into cached file %s", cached_features_file)
         torch.save(features, cached_features_file)
-        
+
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
     all_gate_mask = []
     for idx, f in enumerate(features):
         input_ids_t = np.array(f.input_ids)
-        #print(f.input_ids)
+        # print(f.input_ids)
         s1_sep, s2_sep = np.where(input_ids_t == tokenizer.sep_token_id)[0]
         s1_kw, s2_kw = np.where(input_ids_t == kw_token_id)[0]
         s1_title, s2_title = np.where(input_ids_t == title_token_id)[0]
         gate_mask = np.zeros(len(f.input_ids), dtype=np.float32)
-        gate_mask[:s1_title+1] = 1
-        gate_mask[s1_sep:s2_title+1] = 1
+        gate_mask[:s1_title + 1] = 1
+        gate_mask[s1_sep:s2_title + 1] = 1
         gate_mask[s2_sep] = 1
-        #print(s1_sep, s2_sep)
-        #print(s1_kw, s2_kw)
-        #print(s1_kw, s2_kw-s1_sep)
-        #for i in range(len(gate_mask)):
+        # print(s1_sep, s2_sep)
+        # print(s1_kw, s2_kw)
+        # print(s1_kw, s2_kw-s1_sep)
+        # for i in range(len(gate_mask)):
         #    print('{}:{}'.format(input_ids_t[i], gate_mask[i]), end=' ')
-        #print('')
-        #input()
-        #print('\r{}'.format(idx), end='')
+        # print('')
+        # input()
+        # print('\r{}'.format(idx), end='')
         all_gate_mask.append(gate_mask)
-    all_gate_mask = torch.tensor(all_gate_mask)[:,:,None]
+    all_gate_mask = torch.tensor(all_gate_mask)[:, :, None]
     all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
     all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
     all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
     dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels, all_gate_mask)
-    
+
     return dataset
 
 
 # In[ ]:
 
 
-tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
-tokenizer.add_tokens(['☄', '☢', '龎'])
-kw_token_id, title_token_id, empty_token_id = tokenizer.convert_tokens_to_ids(['☄', '☢', '龎'])
-print(kw_token_id)
-train_dataset = load_and_cache_examples(data_dir='data/event_doc_imp_sign/', max_len=400, 
-                                        mode='train', tokenizer=tokenizer)
-
-
 # In[ ]:
-
-
-dev_dataset = load_and_cache_examples(data_dir='data/event_doc_imp_sign/', max_len=400, 
-                                        mode='dev', tokenizer=tokenizer)
-
-
-# In[ ]:
-
-
-class HyperParams:
-    def __init__(self):
-        self.task_name = 'LongMatching'
-        self.output_mode = 'classification'
-        self.seed = 42
-        self.per_gpu_train_batch_size = 8
-        self.per_gpu_eval_batch_size = 8
-        self.gradient_accumulation_steps = 1
-        self.num_train_epochs = 10
-        self.weight_decay = 0.0
-        self.learning_rate = 1e-5
-        self.adam_epsilon = 1e-8
-        self.max_grad_norm = 1.0
-        self.warmup_steps = 0
-        self.evaluate_during_training = True
-        self.model_name_or_path = 'bert-base-chinese'
-        self.device = 'cuda'
-        self.model_type = 'bert'
-        self.max_steps = -1
-        self.logging_steps = 250
-        self.save_steps = 500
-        self.output_dir = 'model/bert_imp_sign_pr90_tr/'
-        self.n_gpu = 1
-        self.local_rank = -1
-        self.fp16 = False
-        self.eval_all_checkpoints=False
-        
-args = HyperParams()    
-        
 
 
 # In[ ]:
@@ -180,7 +134,8 @@ def set_seed(args):
     torch.manual_seed(args.seed)
     if args.n_gpu > 0:
         torch.cuda.manual_seed_all(args.seed)
-        
+
+
 def train(args, train_dataset, model, tokenizer):
     """ Train the model """
     if args.local_rank in [-1, 0]:
@@ -213,7 +168,7 @@ def train(args, train_dataset, model, tokenizer):
 
     # Check if saved optimizer or scheduler states exist
     if os.path.isfile(os.path.join(args.model_name_or_path, "optimizer.pt")) and os.path.isfile(
-        os.path.join(args.model_name_or_path, "scheduler.pt")
+            os.path.join(args.model_name_or_path, "scheduler.pt")
     ):
         # Load in optimizer and scheduler states
         optimizer.load_state_dict(torch.load(os.path.join(args.model_name_or_path, "optimizer.pt")))
@@ -318,7 +273,7 @@ def train(args, train_dataset, model, tokenizer):
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     logs = {}
                     if (
-                        args.local_rank == -1 and args.evaluate_during_training
+                            args.local_rank == -1 and args.evaluate_during_training
                     ):  # Only evaluate when single GPU otherwise metrics may not average well
                         results = evaluate(args, model, tokenizer)
                         for key, value in results.items():
@@ -373,8 +328,8 @@ def evaluate(args, model, tokenizer, prefix=""):
 
     results = {}
     for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
-        eval_dataset = load_and_cache_examples(data_dir='data/event_doc_imp_sign/', max_len=400, 
-                                        mode='dev', tokenizer=tokenizer)
+        eval_dataset = load_and_cache_examples(data_dir='data/event_doc_imp_sign/', max_len=400,
+                                               mode='dev', tokenizer=tokenizer)
 
         if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
             os.makedirs(eval_output_dir)
@@ -436,24 +391,67 @@ def evaluate(args, model, tokenizer, prefix=""):
     return results
 
 
-# In[ ]:
-set_seed(args)  # Added here for reproductibility
+class HyperParams:
+    def __init__(self):
+        self.task_name = 'LongMatching'
+        self.output_mode = 'classification'
+        self.seed = 42
+        self.per_gpu_train_batch_size = 24
+        self.per_gpu_eval_batch_size = 24
+        self.gradient_accumulation_steps = 1
+        self.num_train_epochs = 20
+        self.weight_decay = 0.0
+        self.learning_rate = 1e-5
+        self.adam_epsilon = 1e-8
+        self.max_grad_norm = 1.0
+        self.warmup_steps = 0
+        self.evaluate_during_training = True
+        self.model_name_or_path = 'bert-base-chinese'
+        self.device = 'cuda'
+        self.model_type = 'bert'
+        self.max_steps = -1
+        self.logging_steps = 1
+        self.save_steps = 727
+        self.output_dir = 'model/lert_base_imp_sign_pr90_tr/'
+        self.n_gpu = 1
+        self.local_rank = -1
+        self.fp16 = False
+        self.eval_all_checkpoints = False
 
-torch.autograd.set_detect_anomaly(True)
 
-len_reduce_list = [int(400*(0.90)**i) for i in range(1, 13)]
+if __name__ == "__main__":
+    args = HyperParams()
+    tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
+    tokenizer.add_tokens(['☄', '☢', '龎'])
+    kw_token_id, title_token_id, empty_token_id = tokenizer.convert_tokens_to_ids(['☄', '☢', '龎'])
+    print(kw_token_id)
+    train_dataset = load_and_cache_examples(data_dir='data/event_doc_imp_sign/', max_len=400,
+                                            mode='train', tokenizer=tokenizer)
 
-#gate_type = 'vecnorm'
-#gate_type = 'pagerank3'
-gate_type = 'pagerank'
-#gate_type = 'attnsum'
+    # In[ ]:
 
-model = BertForSequenceClassification.from_pretrained(
-            'bert-base-chinese', 
-            output_attentions=True,
-            len_reduce_list=len_reduce_list,
-            gate_type=gate_type,
-        ).to('cuda')
-model.resize_token_embeddings(len(tokenizer))
-train(args, train_dataset, model, tokenizer)
+    dev_dataset = load_and_cache_examples(data_dir='data/event_doc_imp_sign/', max_len=400,
+                                          mode='dev', tokenizer=tokenizer)
 
+    # In[ ]:
+    set_seed(args)  # Added here for reproductibility
+
+    torch.autograd.set_detect_anomaly(True)
+
+    # 坑 todo
+    len_reduce_list = [int(400 * (0.90) ** i) for i in range(1, 13)]
+
+    # gate_type = 'vecnorm'
+    # gate_type = 'pagerank3'
+    gate_type = 'pagerank'
+    # gate_type = 'attnsum'
+
+    model = BertForSequenceClassification.from_pretrained(
+        'bert-base-chinese',
+        output_attentions=True,
+        len_reduce_list=len_reduce_list,
+        gate_type=gate_type)
+
+    model.to('cuda')
+    model.resize_token_embeddings(len(tokenizer))
+    train(args, train_dataset, model, tokenizer)
