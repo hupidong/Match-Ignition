@@ -2,9 +2,10 @@
 import sys
 import numpy as np
 from collections import OrderedDict
-#import gensim
+# import gensim
 from nltk.tokenize.punkt import PunktSentenceTokenizer
 import re
+
 
 # reload(sys)
 # sys.setdefaultencoding('utf8')
@@ -148,6 +149,31 @@ def right_pad_zeros_1d(lst, max_len):
     lst = lst[0:max_len]
     lst.extend([0] * (max_len - len(lst)))
     return lst
+
+
+def replace_invisible_space(text, repl=" "):
+    """
+    替换非可见字符
+    :param text: 原始文本
+    :param repl: 非可见字符替换成的字符
+    :return:替换后的文本
+    """
+    text = re.sub(
+        r'[\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u202F\u205F\u00A0\u3000\ufeff]',
+        repl, text)
+    return text
+
+
+def clean_text(text, remove_space=True):
+    # clean url
+    pattern_url = r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
+    text = re.sub(pattern=pattern_url, repl="", string=text)
+    # clean space
+    text = replace_invisible_space(text, " ")
+    if remove_space:
+        text = text.replace(" ", "")
+
+    return text
 
 
 if __name__ == "__main__":

@@ -11,118 +11,14 @@ from tqdm import tqdm, trange
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 import torch
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from transformers import BertTokenizer, BertModel, BertForSequenceClassification, AdamW, get_linear_schedule_with_warmup
-from transformers.data import DataProcessor, InputExample, InputFeatures
-from transformers import glue_convert_examples_to_features as convert_examples_to_features
 from tensorboardX import SummaryWriter
 from transformers.data.metrics import acc_and_f1
 
+from data_loader import load_and_cache_examples
+
 logger = logging.getLogger(__name__)
-
-
-# In[ ]:
-
-
-class MatchingDataProcessor(DataProcessor):
-    """Processor for the Matching data set (GLUE version)."""
-
-    def get_train_examples(self, data_dir):
-        """See base class."""
-        logger.info("LOOKING AT {}".format(os.path.join(data_dir, "train.txt")))
-        return self._create_examples(os.path.join(data_dir, "train.txt"), "train")
-
-    def get_dev_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(os.path.join(data_dir, "test.txt"), "test")
-
-    def get_labels(self):
-        """See base class."""
-        return ["0", "1"]
-
-    def _create_examples(self, filename, set_type):
-        """Creates examples for the training and dev sets."""
-        examples = []
-        for (i, line) in enumerate(open(filename)):
-            line = line.strip()
-            line = line.replace('[EOS]', '').replace('[SEP]', '').replace('[KW]', '')
-            part = line.split('\t')
-            part = [''.join(x.split()) for x in part]
-            guid = "%s-%s" % (set_type, i)
-            text_a = part[0]
-            text_b = part[1]
-            label = part[2]
-            examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
-        return examples
-
-
-# In[ ]:
-
-
-def load_and_cache_examples(data_dir, max_len, mode, tokenizer):
-    processor = MatchingDataProcessor()
-
-    # load data
-    cached_features_file = os.path.join(
-        data_dir,
-        "cached_{}_{}".format(
-            mode,
-            str(max_len),
-        ),
-    )
-    if os.path.exists(cached_features_file):
-        logger.info("Loading features from cached file %s", cached_features_file)
-        features = torch.load(cached_features_file)
-    else:
-        examples = (
-            processor.get_dev_examples(data_dir) if mode == 'dev' else processor.get_train_examples(data_dir)
-        )
-        features = convert_examples_to_features(
-            examples,
-            tokenizer,
-            label_list=processor.get_labels(),
-            max_length=max_len,
-            output_mode='classification',
-            pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
-            pad_token_segment_id=0,
-        )
-        logger.info("Saving features into cached file %s", cached_features_file)
-        torch.save(features, cached_features_file)
-
-    all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
-    all_gate_mask = []
-    for idx, f in enumerate(features):
-        input_ids_t = np.array(f.input_ids)
-        # print(f.input_ids)
-        s1_sep, s2_sep = np.where(input_ids_t == tokenizer.sep_token_id)[0]
-        s1_kw, s2_kw = np.where(input_ids_t == kw_token_id)[0]
-        s1_title, s2_title = np.where(input_ids_t == title_token_id)[0]
-        gate_mask = np.zeros(len(f.input_ids), dtype=np.float32)
-        gate_mask[:s1_title + 1] = 1
-        gate_mask[s1_sep:s2_title + 1] = 1
-        gate_mask[s2_sep] = 1
-        # print(s1_sep, s2_sep)
-        # print(s1_kw, s2_kw)
-        # print(s1_kw, s2_kw-s1_sep)
-        # for i in range(len(gate_mask)):
-        #    print('{}:{}'.format(input_ids_t[i], gate_mask[i]), end=' ')
-        # print('')
-        # input()
-        # print('\r{}'.format(idx), end='')
-        all_gate_mask.append(gate_mask)
-    all_gate_mask = torch.tensor(all_gate_mask)[:, :, None]
-    all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
-    all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
-    all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
-    dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels, all_gate_mask)
-
-    return dataset
-
-
-# In[ ]:
-
-
-# In[ ]:
 
 
 # In[ ]:
@@ -229,7 +125,8 @@ def train(args, train_dataset, model, tokenizer):
         epochs_trained, int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0],
     )
     for _ in train_iterator:
-        epoch_iterator = tqdm(train_dataloader, desc="Iteration", disable=args.local_rank not in [-1, 0])
+        epoch_iterator = tqdm(train_dataloader, desc=f"Epoch: {_}/{int(args.num_train_epochs)}",
+                              disable=args.local_rank not in [-1, 0])
         for step, batch in enumerate(epoch_iterator):
 
             # Skip past any already trained steps if resuming training
@@ -328,8 +225,9 @@ def evaluate(args, model, tokenizer, prefix=""):
 
     results = {}
     for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
-        eval_dataset = load_and_cache_examples(data_dir='data/event_doc_imp_sign/', max_len=400,
-                                               mode='dev', tokenizer=tokenizer)
+        eval_dataset = load_and_cache_examples(data_dir=args.data_dir, max_len=args.max_encode_len,
+                                               title_token_id=title_token_id, mode='dev', tokenizer=tokenizer,
+                                               use_cache=True)
 
         if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
             os.makedirs(eval_output_dir)
@@ -410,30 +308,39 @@ class HyperParams:
         self.device = 'cuda'
         self.model_type = 'bert'
         self.max_steps = -1
-        self.logging_steps = 1
-        self.save_steps = 727
-        self.output_dir = 'model/lert_base_imp_sign_pr90_tr/'
+        self.logging_steps = 527
+        self.save_steps = 527
+        # self.data_dir = 'data/dataset/cnse/model'
+        # self.output_dir = os.path.join('model/cnse', self.model_name_or_path)
+        self.data_dir = 'data/dataset/yuqing_news/v0/model'
+        self.output_dir = os.path.join('model/yuqing_news_v0', self.model_name_or_path)
         self.n_gpu = 1
         self.local_rank = -1
         self.fp16 = False
         self.eval_all_checkpoints = False
+        self.max_encode_len = 400
+        self.use_cache = False
 
 
 if __name__ == "__main__":
     args = HyperParams()
-    tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
+    tokenizer = BertTokenizer.from_pretrained(args.model_name_or_path)
     tokenizer.add_tokens(['☄', '☢', '龎'])
     kw_token_id, title_token_id, empty_token_id = tokenizer.convert_tokens_to_ids(['☄', '☢', '龎'])
-    print(kw_token_id)
-    train_dataset = load_and_cache_examples(data_dir='data/event_doc_imp_sign/', max_len=400,
-                                            mode='train', tokenizer=tokenizer)
+    print(f"kw_token_id: {kw_token_id}")
 
-    # In[ ]:
+    train_dataset = load_and_cache_examples(data_dir=args.data_dir, max_len=args.max_encode_len,
+                                            title_token_id=title_token_id, mode='train', tokenizer=tokenizer,
+                                            use_cache=args.use_cache)
 
-    dev_dataset = load_and_cache_examples(data_dir='data/event_doc_imp_sign/', max_len=400,
-                                          mode='dev', tokenizer=tokenizer)
+    dev_dataset = load_and_cache_examples(data_dir=args.data_dir, max_len=args.max_encode_len,
+                                          title_token_id=title_token_id, mode='dev', tokenizer=tokenizer,
+                                          use_cache=args.use_cache)
 
-    # In[ ]:
+    test_dataset = load_and_cache_examples(data_dir=args.data_dir, max_len=args.max_encode_len,
+                                           title_token_id=title_token_id, mode='test', tokenizer=tokenizer,
+                                           use_cache=args.use_cache)
+
     set_seed(args)  # Added here for reproductibility
 
     torch.autograd.set_detect_anomaly(True)
