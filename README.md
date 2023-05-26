@@ -15,19 +15,23 @@ sh switch_version.sh 1
 
 ### Data Preparation
 ```bash
-cd data
+cd data/dataset/cnse
 tar xzvf orig.tar.gz
 ```
 Note: the original dataset can be downloaded from [here](https://github.com/BangLiu/ArticlePairMatching).
 
 ### Sentence-level Noise Filtering
 ```bash
-python generate_data.py
+# CNSE dataset
+python generate_data.py --data_dir=data/dataset/cnse/orig --save_dir==data/dataset/cnse/model --from_raw_text=0 --append_keyword=1
+
+# general raw-text dataset
+python generate_data.py --data_dir=data/dataset/yuqing_news/example/orig --save_dir=data/dataset/yuqing_news/example/model --from_raw_text=1 --append_keyword=0
 ```
 
 ### Word-level Noise Filtering
 ```bash
-python run.py
+python run.py 
 ```
 
 ## Citation
