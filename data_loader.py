@@ -13,9 +13,12 @@ from transformers.data import DataProcessor, InputExample, InputFeatures
 from transformers import glue_convert_examples_to_features as convert_examples_to_features
 
 from typing import List
+from joblib import Parallel, delayed
 import nlp_utils
 
 DOC_SEP = "\t\t\t\t"
+
+n_jobs = 10
 
 
 class Doc:
@@ -225,11 +228,11 @@ class Doc:
         return results
 
 
-def create_single_example(doc_pair: Doc,
-                          append_title_node=False,
-                          append_title=False,
-                          append_keyword=False,
-                          stop_words=set()):
+def create_single_example_from_doc_pair(doc_pair: Doc,
+                                        append_title_node=False,
+                                        append_title=False,
+                                        append_keyword=False,
+                                        stop_words=set()):
     doc_pair.parse_sentence(append_title_node=append_title_node)
     doc_pair.filter_word(stop_words)
     doc_pair.filter_sentence()
@@ -280,64 +283,79 @@ def create_and_save_dataset(filepath,
                             tokenizer_word=jieba.lcut):
     fout = open(filepath, 'w', encoding='utf8')
     for line in tqdm(open(datapath, 'r', encoding='utf8')):
-        if from_raw_text:
-            example = json.loads(line)
-            title_a = nlp_utils.clean_text(example["doc_a"]["title"])
-            content_a = nlp_utils.clean_text(example["doc_a"]["content"])
-            uid_a = example["doc_a"]["uid"]
-
-            title_b = nlp_utils.clean_text(example["doc_b"]["title"])
-            content_b = nlp_utils.clean_text(example["doc_b"]["content"])
-            uid_b = example["doc_b"]["uid"]
-            doc = Doc(title_a=title_a,
-                      title_b=title_b,
-                      content_a=content_a,
-                      content_b=content_b,
-                      doc_id_a=uid_a,
-                      doc_id_b=uid_b,
-                      label=example["label"],
-                      tokenizer=tokenizer_word)
-        else:
-            doc = Doc(line)
-        doc.parse_sentence(append_title_node=append_title_node)
-        doc.filter_word(stop_words)
-        doc.filter_sentence()
-        doc.build_pair_graph()
-        # doc.build_each_graph()
-        # s1 = s2 = []
-        s1, s2 = doc.important_sentence(5)
-        # s1, s2 = doc.selected_sentence_1(disk=3, topk=5)
-        # s1, s2 = doc.selected_sentence_2(disk=5, topk=3)
-        # s1, s2 = list(doc.dset1.keys())[:7], list(doc.dset2.keys())[:7]
-        # s1 = [[x, 1] for x in s1]
-        # s2 = [[x, 1] for x in s2]
-        d1 = []
-        d2 = []
-        if append_title:
-            d1.append(doc.title_a + ' ☢')
-            d2.append(doc.title_b + ' ☢')
-        if append_keyword:
-            d1.append(doc.ner_keywords_a + ' ☄')
-            d2.append(doc.ner_keywords_b + ' ☄')
-        for s in s1:
-            d1.append(doc.dset1[s[0]])
-        for s in s2:
-            d2.append(doc.dset2[s[0]])
-        # for s in s1:
-        #    d1.append(' '.join(['的'] * len(''.join(doc.dset1[s[0]].split()))))
-        # for s in s2:
-        #    d2.append(' '.join(['的'] * len(''.join(doc.dset2[s[0]].split()))))
-        if (len(d1) == 0 or len(d2) == 0) and doc.label == 1:
-            print('Error')
-            break
-        d1 = ' '.join(d1)
-        d2 = ' '.join(d2)
-        if len(d1) == 0:
-            d1 = '龎'
-        if len(d2) == 0:
-            d2 = '龎'
+        d1, d2, doc = create_single_sample(line=line,
+                                           append_title_node=append_title_node,
+                                           append_title=append_title,
+                                           append_keyword=append_keyword,
+                                           stop_words=stop_words,
+                                           from_raw_text=from_raw_text,
+                                           tokenizer_word=tokenizer_word
+                                           )
+        if d1 is None and d2 is None and doc is None:
+            continue
         fout.write(f'{d1}{DOC_SEP}{d2}{DOC_SEP}{doc.label}\n')
     fout.close()
+
+
+def create_single_sample(line, append_title_node, append_title, append_keyword,
+                         stop_words, from_raw_text, tokenizer_word):
+    if from_raw_text:
+        example = json.loads(line)
+        title_a = nlp_utils.clean_text(example["doc_a"]["title"])
+        content_a = nlp_utils.clean_text(example["doc_a"]["content"])
+        uid_a = example["doc_a"]["uid"]
+
+        title_b = nlp_utils.clean_text(example["doc_b"]["title"])
+        content_b = nlp_utils.clean_text(example["doc_b"]["content"])
+        uid_b = example["doc_b"]["uid"]
+        doc = Doc(title_a=title_a,
+                  title_b=title_b,
+                  content_a=content_a,
+                  content_b=content_b,
+                  doc_id_a=uid_a,
+                  doc_id_b=uid_b,
+                  label=example["label"],
+                  tokenizer=tokenizer_word)
+    else:
+        doc = Doc(line)
+    doc.parse_sentence(append_title_node=append_title_node)
+    doc.filter_word(stop_words)
+    doc.filter_sentence()
+    doc.build_pair_graph()
+    # doc.build_each_graph()
+    # s1 = s2 = []
+    s1, s2 = doc.important_sentence(5)
+    # s1, s2 = doc.selected_sentence_1(disk=3, topk=5)
+    # s1, s2 = doc.selected_sentence_2(disk=5, topk=3)
+    # s1, s2 = list(doc.dset1.keys())[:7], list(doc.dset2.keys())[:7]
+    # s1 = [[x, 1] for x in s1]
+    # s2 = [[x, 1] for x in s2]
+    d1 = []
+    d2 = []
+    if append_title:
+        d1.append(doc.title_a + ' ☢')
+        d2.append(doc.title_b + ' ☢')
+    if append_keyword:
+        d1.append(doc.ner_keywords_a + ' ☄')
+        d2.append(doc.ner_keywords_b + ' ☄')
+    for s in s1:
+        d1.append(doc.dset1[s[0]])
+    for s in s2:
+        d2.append(doc.dset2[s[0]])
+    # for s in s1:
+    #    d1.append(' '.join(['的'] * len(''.join(doc.dset1[s[0]].split()))))
+    # for s in s2:
+    #    d2.append(' '.join(['的'] * len(''.join(doc.dset2[s[0]].split()))))
+    if (len(d1) == 0 or len(d2) == 0) and doc.label == 1:
+        print('Error')
+        return None, None, None
+    d1 = ' '.join(d1)
+    d2 = ' '.join(d2)
+    if len(d1) == 0:
+        d1 = '龎'
+    if len(d2) == 0:
+        d2 = '龎'
+    return (d1, d2, doc)
 
 
 class MatchingDataProcessor(DataProcessor):
@@ -378,6 +396,30 @@ class MatchingDataProcessor(DataProcessor):
 
 
 # In[ ]:
+def process_for_long_doc(example, max_len, tokenizer, title_token_id, max_title=32):
+    """
+    对于长文本，要特殊处理一下，保证两篇文章都能取到足够的字符长度
+    """
+    eps = 1
+    # 最大字符级长度相比token可以适当膨胀一下，一般经验参数1.3左右，根据不同vocab可能会有不同
+    dilatation_coref = 1.2
+    title_token = tokenizer.convert_ids_to_tokens(title_token_id)
+    text_a = example.text_a
+    text_b = example.text_b
+    title_a, content_a = text_a.split(title_token)
+    title_b, content_b = text_b.split(title_token)
+    title_a = title_a[0: max_title]
+    title_b = title_b[0: max_title]
+    max_len_char = dilatation_coref * max_len
+    len_content_a = int(len(content_a) / (len(content_a) + len(content_b) + eps) * (
+            max_len_char - len(title_a) - len(title_b)))
+    len_content_b = int(len(content_b) / (len(content_a) + len(content_b) + eps) * (
+            max_len_char - len(title_a) - len(title_b)))
+    content_a = content_a[0: len_content_a]
+    content_b = content_b[0: len_content_b]
+    example.text_a = title_a + title_token + content_a
+    example.text_b = title_b + title_token + content_b
+    return example
 
 
 def load_and_cache_examples(data_dir, max_len, mode, tokenizer, title_token_id, use_cache=False):
@@ -407,14 +449,16 @@ def load_and_cache_examples(data_dir, max_len, mode, tokenizer, title_token_id, 
             examples = (
                 processor.get_test_examples(data_dir)
             )
+        # long-document
+        examples = [process_for_long_doc(example, max_len, tokenizer, title_token_id) for example in examples]
         features = convert_examples_to_features(
             examples,
             tokenizer,
             label_list=processor.get_labels(),
             max_length=max_len,
-            output_mode='classification',
-            pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
-            pad_token_segment_id=0,
+            output_mode='classification'
+            # pad_token=tokenizer.convert_tokens_to_ids([tokenizer.pad_token])[0],
+            # pad_token_segment_id=0,
         )
         print("Saving features into cached file %s", cached_features_file)
         torch.save(features, cached_features_file)
@@ -427,7 +471,12 @@ def load_and_cache_examples(data_dir, max_len, mode, tokenizer, title_token_id, 
         s1_sep, s2_sep = np.where(input_ids_t == tokenizer.sep_token_id)[0]
         # TODO how to use ner-keywords??
         # s1_kw, s2_kw = np.where(input_ids_t == kw_token_id)[0]
-        s1_title, s2_title = np.where(input_ids_t == title_token_id)[0]
+        try:
+            s1_title, s2_title = np.where(input_ids_t == title_token_id)[0]
+        except Exception as e:
+            print(f"{idx}")
+            print(f"{e.__str__()}")
+            raise e
         gate_mask = np.zeros(len(f.input_ids), dtype=np.float32)
         gate_mask[:s1_title + 1] = 1
         gate_mask[s1_sep:s2_title + 1] = 1

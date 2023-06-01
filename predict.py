@@ -6,7 +6,7 @@ from transformers.data import InputExample
 from transformers import glue_convert_examples_to_features as convert_examples_to_features
 import torch
 
-from data_loader import Doc, create_single_example
+from data_loader import Doc, create_single_example_from_doc_pair
 
 stop_words = set()
 for w in open('./data/stopwords-zh.txt'):
@@ -78,12 +78,12 @@ def create_inputs(titles_a,
                        tokenizer=tokenizer_word,
                        label="1"
                        )
-        text_a, text_b, label = create_single_example(doc_pair,
-                                                      append_title_node=True,
-                                                      append_title=True,
-                                                      append_keyword=False,
-                                                      stop_words=stop_words
-                                                      )
+        text_a, text_b, label = create_single_example_from_doc_pair(doc_pair,
+                                                                    append_title_node=True,
+                                                                    append_title=True,
+                                                                    append_keyword=False,
+                                                                    stop_words=stop_words
+                                                                    )
         guid = doc_id_a + "-" + doc_id_b
         examples.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
 

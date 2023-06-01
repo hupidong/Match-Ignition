@@ -11,9 +11,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--stopword_path", type=str, default="./data/stopwords-zh.txt",
                         help="停用词文件路径")
-    parser.add_argument("--data_dir", type=str, default='./data/dataset/yuqing_news/v1/orig/',
+    parser.add_argument("--data_dir", type=str, default='./data/dataset/yuqing_news/v3/orig/',
                         help="原始数据所在目录")
-    parser.add_argument("--save_dir", type=str, default='./data/dataset/yuqing_news/v1/model',
+    parser.add_argument("--save_dir", type=str, default='./data/dataset/yuqing_news/v3/model',
                         help="转换后的模型数据存放目录")
     parser.add_argument("--from_raw_text", type=int, choices=[0, 1], default=1,
                         help="原始数据类型： 0(CNSE数据集), 1(原始文本数据)")

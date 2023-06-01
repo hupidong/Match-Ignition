@@ -14,13 +14,13 @@ from nlp_utils import clean_text
 from predict import read_examples, predict
 
 if __name__ == "__main__":
-    from sklearn.metrics import precision_recall_fscore_support, classification_report
+    from sklearn.metrics import classification_report
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_path", type=str, default="model/cnse/bert-base-chinese/checkpoint-1454")
+    parser.add_argument("--model_path", type=str, default="model/yuqing_news_v0/bert-base-chinese/checkpoint-5270")
     parser.add_argument("--max_tokens", type=int, default=512)
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--data_path", type=str, default="data/dataset/yuqing_news/v0/orig/all.jsonl")
+    parser.add_argument("--data_path", type=str, default="data/dataset/yuqing_news/v1/orig/all.jsonl")
     parser.add_argument("--batch_size", type=int, default=32)
 
     args = parser.parse_args()
