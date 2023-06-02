@@ -168,6 +168,10 @@ def train(args, train_dataset, model, tokenizer):
                 model.zero_grad()
                 global_step += 1
 
+                if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
+                    # Save model checkpoint
+                    save_checkpoint(model=model, optimizer=optimizer, scheduler=scheduler, steps=global_step, args=args)
+
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     logs = {}
                     if (
@@ -188,16 +192,13 @@ def train(args, train_dataset, model, tokenizer):
                         tb_writer.add_scalar(key, value, global_step)
                     print(json.dumps({**logs, **{"step": global_step}}))
 
-                if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
-                    # Save model checkpoint
-                    save_checkpoint(model=model, optimizer=optimizer, scheduler=scheduler, steps=global_step, args=args)
-
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
                 break
 
         # save every epoch
         save_checkpoint(model=model, optimizer=optimizer, scheduler=scheduler, steps=global_step, args=args)
+
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
             break
