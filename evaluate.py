@@ -32,16 +32,12 @@ if __name__ == "__main__":
     print(f"save_path_jsonl: {args.save_path_jsonl}")
     print(f"save_path_excel: {args.save_path_excel}")
 
-    len_reduce_list = [int(400 * (0.90) ** i) for i in range(1, 13)]
 
-    gate_type = 'pagerank'
 
     tokenizer = BertTokenizer.from_pretrained(args.model_path)
     model = BertForSequenceClassification.from_pretrained(
         args.model_path,
-        output_attentions=True,
-        len_reduce_list=len_reduce_list,
-        gate_type=gate_type)
+        output_attentions=True)
     model.to(args.device)
     model.eval()
 

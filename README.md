@@ -9,8 +9,8 @@
 ### Environment Preparation
 ```bash
 pip install -r requirements.txt
-cd transformers
-sh switch_version.sh 1
+cd transformers-v4.30.0.dev0
+pip install -e .
 ```
 
 ### Data Preparation

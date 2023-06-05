@@ -13,10 +13,12 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from transformers import BertTokenizer, BertModel, BertForSequenceClassification, AdamW, get_linear_schedule_with_warmup
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoConfig
 from tensorboardX import SummaryWriter
 from transformers.data.metrics import acc_and_f1
 
 from data_loader import load_and_cache_examples
+from nlp_utils import JiebaTokenizer
 
 logging.basicConfig(filename="log.log")
 logger = logging.getLogger(__name__)
@@ -142,7 +144,11 @@ def train(args, train_dataset, model, tokenizer):
                 inputs["token_type_ids"] = (
                     batch[2] if args.model_type in ["bert", "xlnet", "albert"] else None
                 )  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
-            outputs = model(**inputs)
+            try:
+                outputs = model(**inputs)
+            except Exception as e:
+                print(inputs)
+                raise e
             loss = outputs[0]  # model outputs are always tuple in transformers (see doc)
 
             if args.n_gpu > 1:
@@ -168,10 +174,6 @@ def train(args, train_dataset, model, tokenizer):
                 model.zero_grad()
                 global_step += 1
 
-                if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
-                    # Save model checkpoint
-                    save_checkpoint(model=model, optimizer=optimizer, scheduler=scheduler, steps=global_step, args=args)
-
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     logs = {}
                     if (
@@ -192,13 +194,16 @@ def train(args, train_dataset, model, tokenizer):
                         tb_writer.add_scalar(key, value, global_step)
                     print(json.dumps({**logs, **{"step": global_step}}))
 
+                if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
+                    # Save model checkpoint
+                    save_checkpoint(model=model, optimizer=optimizer, scheduler=scheduler, steps=global_step, args=args)
+
             if args.max_steps > 0 and global_step > args.max_steps:
                 epoch_iterator.close()
                 break
 
         # save every epoch
         save_checkpoint(model=model, optimizer=optimizer, scheduler=scheduler, steps=global_step, args=args)
-
         if args.max_steps > 0 and global_step > args.max_steps:
             train_iterator.close()
             break
@@ -303,38 +308,42 @@ class HyperParams:
         self.task_name = 'LongMatching'
         self.output_mode = 'classification'
         self.seed = 42
-        self.per_gpu_train_batch_size = 36
-        self.per_gpu_eval_batch_size = 36
+        self.per_gpu_train_batch_size = 16
+        self.per_gpu_eval_batch_size = 16
         self.gradient_accumulation_steps = 1
-        self.num_train_epochs = 1
+        self.num_train_epochs = 10
         self.weight_decay = 0.0
         self.learning_rate = 1e-5
         self.adam_epsilon = 1e-8
         self.max_grad_norm = 1.0
         self.warmup_steps = 0
         self.evaluate_during_training = True
-        self.model_name_or_path = 'bert-base-chinese'
-        # self.model_name_or_path = 'nghuyong/ernie-3.0-nano-zh'
+        # self.model_name_or_path = 'bert-base-chinese'
+        self.model_name_or_path = 'nghuyong/ernie-3.0-medium-zh'
+        # self.model_name_or_path = 'Lowin/chinese-bigbird-base-4096'
         self.device = 'cuda'
         self.model_type = 'bert'
         self.max_steps = -1
-        self.logging_steps = 10000
-        self.save_steps = 10000
-        # self.data_dir = 'data/dataset/cnse/model'
-        # self.output_dir = os.path.join('model/cnse', self.model_name_or_path)
-        self.data_dir = 'data/dataset/yuqing_news/v3/model'
-        self.output_dir = os.path.join('model/yuqing_news_v3', self.model_name_or_path)
+        self.logging_steps = 1090
+        self.save_steps = 1090
+        self.data_dir = 'data/dataset/cnse/model'
+        self.output_dir = os.path.join('model/cnse', self.model_name_or_path)
+        # self.data_dir = 'data/dataset/yuqing_news/v0/model'
+        # self.output_dir = os.path.join('model/yuqing_news_v0', self.model_name_or_path)
         self.n_gpu = 1
         self.local_rank = -1
         self.fp16 = False
         self.eval_all_checkpoints = False
-        self.max_encode_len = 512
-        self.use_cache = True
+        self.max_encode_len = 1024
+        self.use_cache = False
 
 
 if __name__ == "__main__":
     args = HyperParams()
-    tokenizer = BertTokenizer.from_pretrained(args.model_name_or_path)
+    if "chinese-bigbird" or "ernie" in args.model_name_or_path:
+        tokenizer = JiebaTokenizer.from_pretrained(args.model_name_or_path)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     tokenizer.add_tokens(['☄', '☢', '龎'])
     kw_token_id, title_token_id, empty_token_id = tokenizer.convert_tokens_to_ids(['☄', '☢', '龎'])
     print(f"kw_token_id: {kw_token_id}")
@@ -352,24 +361,37 @@ if __name__ == "__main__":
                                            title_token_id=title_token_id, mode='test', tokenizer=tokenizer,
                                            use_cache=args.use_cache)
 
-    set_seed(args)  # Added here for reproductibility
+    set_seed(args.seed)  # Added here for reproductibility
 
     torch.autograd.set_detect_anomaly(True)
 
-    # 坑 todo
-    len_reduce_list = [int(args.max_encode_len * (0.90) ** i) for i in range(1, 13)]
+    #
+    config = AutoConfig.from_pretrained(args.model_name_or_path)
+    num_layers = config.num_hidden_layers
+    len_reduce_list = [int(args.max_encode_len * (0.90) ** i) for i in range(1, num_layers+1)]
 
     # gate_type = 'vecnorm'
     # gate_type = 'pagerank3'
     gate_type = 'pagerank'
     # gate_type = 'attnsum'
 
-    model = BertForSequenceClassification.from_pretrained(
-        args.model_name_or_path,
-        output_attentions=True,
-        len_reduce_list=len_reduce_list,
-        gate_type=gate_type)
+    if "chinese-bigbird" in args.model_name_or_path:
+        model = AutoModelForSequenceClassification.from_pretrained(
+            args.model_name_or_path,
+            output_attentions=True,
+            len_reduce_list=len_reduce_list,
+            gate_type=gate_type,
+            attention_type="original_full"
+        )
+    else:
+        model = AutoModelForSequenceClassification.from_pretrained(
+            args.model_name_or_path,
+            output_attentions=True,
+            len_reduce_list=len_reduce_list,
+            gate_type=gate_type,
+        )
 
-    model.to('cuda')
-    model.resize_token_embeddings(len(tokenizer))
+    model.to(args.device)
+    if "ernie" != model.base_model_prefix:
+        model.resize_token_embeddings(len(tokenizer))
     train(args, train_dataset, model, tokenizer)

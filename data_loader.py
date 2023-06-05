@@ -474,8 +474,11 @@ def load_and_cache_examples(data_dir, max_len, mode, tokenizer, title_token_id, 
         try:
             s1_title, s2_title = np.where(input_ids_t == title_token_id)[0]
         except Exception as e:
-            print(f"{idx}")
             print(f"{e.__str__()}")
+            print(f"idx:{idx}")
+            print(f"example: {examples[idx]}")
+            print(json.dumps({"text": examples[idx].text_a+examples[idx].text_b}, ensure_ascii=False))
+
             raise e
         gate_mask = np.zeros(len(f.input_ids), dtype=np.float32)
         gate_mask[:s1_title + 1] = 1

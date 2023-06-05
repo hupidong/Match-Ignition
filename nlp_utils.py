@@ -2,9 +2,10 @@
 import sys
 import numpy as np
 from collections import OrderedDict
-# import gensim
 from nltk.tokenize.punkt import PunktSentenceTokenizer
 import re
+import jieba_fast
+from transformers import BertTokenizer
 
 
 # reload(sys)
@@ -175,6 +176,20 @@ def clean_text(text, remove_space=True):
 
     return text
 
+class JiebaTokenizer(BertTokenizer):
+    def __init__(
+        self, pre_tokenizer=lambda x: jieba_fast.cut(x, HMM=False), *args, **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+        self.pre_tokenizer = pre_tokenizer
+    def _tokenize(self, text, *arg, **kwargs):
+        split_tokens = []
+        for word in self.pre_tokenizer(text):
+            if word in self.vocab:
+                split_tokens.append(word)
+            else:
+                split_tokens.extend(super()._tokenize(word))
+        return split_tokens
 
 if __name__ == "__main__":
     a = "这个 苹果 好哒 啊 ！ ！ ！ 坑死 人 了 。 你 是 谁 ？ 额 。 。 。 好吧 。"
